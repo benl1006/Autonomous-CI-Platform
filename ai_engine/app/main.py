@@ -99,6 +99,7 @@ class _PullRequestPayload(BaseModel):
     headsha: str = ""
     basesha: str = ""
     merged: bool = False
+    url: str = ""
 
 
 class JobRequest(BaseModel):
@@ -120,7 +121,7 @@ class JobRequest(BaseModel):
 async def _process_job(job_type: str, payload: JobRequest) -> None:
     """Background task: analyse logs and POST the result back to the orchestrator."""
     from app.services import orchestrator_client
-    from app.services.test_gen import generate_tests
+    from app.services.repo_test_gen import generate_initial_test
 
     pr = payload.PullRequest
     pr_dict = {
@@ -132,7 +133,23 @@ async def _process_job(job_type: str, payload: JobRequest) -> None:
         "headsha": pr.headsha,
         "basesha": pr.basesha,
         "merged": pr.merged,
+        "url": pr.url,
     }
+
+    if job_type == "open":
+        package = generate_initial_test(payload.RepoUrl, pr.headsha, pr_dict)
+        await orchestrator_client.send_response(
+            payload.Wfid,
+            pr_dict,
+            done=False,
+            test_name=package["test_name"],
+            tests=package["test_code"].encode(),
+            test_cmd=package["test_cmd"],
+        )
+        return
+
+    if job_type in {"edit", "sync"}:
+        return
 
     if job_type == "close":
         await orchestrator_client.send_response(
@@ -154,13 +171,14 @@ async def _process_job(job_type: str, payload: JobRequest) -> None:
         return
 
     combined_log = "\n".join(filter(None, [payload.Stdout, payload.Stderr, payload.Errors]))
-    package = generate_tests(combined_log, source="ci")
+    package = generate_initial_test(payload.RepoUrl, pr.headsha, pr_dict, failure_log=combined_log)
     await orchestrator_client.send_response(
         payload.Wfid,
         pr_dict,
         done=False,
-        test_name=f"test_{package['fixture_slug']}.py",
-        tests=package["test_stub"].encode(),
+        test_name=package["test_name"],
+        tests=package["test_code"].encode(),
+        test_cmd=package["test_cmd"],
     )
 
 
@@ -179,9 +197,6 @@ async def job_handler(request: Request, background_tasks: BackgroundTasks) -> di
         payload = JobRequest.model_validate_json(body)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
-
-    if job_type in ("open", "edit", "sync"):
-        return {"status": "ok"}
 
     background_tasks.add_task(_process_job, job_type, payload)
     return {"status": "accepted"}

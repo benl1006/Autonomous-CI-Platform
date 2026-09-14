@@ -15,14 +15,15 @@ type AIEngineRequest struct {
 	// Mandatory
 	Wfid        int         `json:"Wfid"`
 	PullRequest PullRequest `json:"PullRequest"`
+	RepoUrl     string      `json:"RepoUrl"`
 
 	// Test results (optional; leave blank if not sending logs)
 	Stdout    string    `json:"Stdout"`
 	Stderr    string    `json:"Stderr"`
 	StartTime time.Time `json:"StartTime"`
 	EndTime   time.Time `json:"EndTime"`
-	Errors    string    `json:"Errors"` // Compile or entry command errors
-	Status    string    `json:"Status"` // One of "created", "running", "paused", "restarting", "removing", "exited", or "dead"
+	Errors    string    `json:"Errors"`    // Compile or entry command errors
+	Status    string    `json:"Status"`    // One of "created", "running", "paused", "restarting", "removing", "exited", or "dead"
 	OOMKilled bool      `json:"OOMKilled"` // Killed: out of memory
 	ExitCode  int       `json:"ExitCode"`
 }

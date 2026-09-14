@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/config"
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/types"
@@ -70,6 +71,9 @@ func ClearWorkspaces() (err error) {
 
 // Parses and inserts tests.
 func InsertTests(path string, data []byte) (err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("Failed to create test directory: %w", err)
+	}
 	file, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("Failed to create test file: %w", err)

@@ -155,6 +155,7 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 				if err = servertools.SendRequestAIEngine(ctx, "open", types.AIEngineRequest{
 					Wfid:        wf.wfid,
 					PullRequest: *wf.pullRequest,
+					RepoUrl:     config.RepositoryUrl,
 				}); err != nil {
 					wf.errorChannel <- ErrorObject{
 						wfid: wf.wfid,
@@ -209,7 +210,16 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 				}
 				wf.attemptNum++
 
-				if err := wstools.InsertTests(filepath.Join(wf.workspace.path, aier.TestName), aier.Tests); err != nil {
+				testPath := filepath.Clean(aier.TestName)
+				if filepath.IsAbs(testPath) || testPath == ".." || strings.HasPrefix(testPath, ".."+string(filepath.Separator)) {
+					wf.errorChannel <- ErrorObject{
+						wfid: wf.wfid,
+						err:  fmt.Errorf("invalid generated test path: %q", aier.TestName),
+					}
+					continue
+				}
+
+				if err := wstools.InsertTests(filepath.Join(wf.workspace.path, testPath), aier.Tests); err != nil {
 					wf.errorChannel <- ErrorObject{
 						wfid: wf.wfid,
 						err:  fmt.Errorf("Failed to insert tests: %w", err),
@@ -248,6 +258,7 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 				if err := servertools.SendRequestAIEngine(ctx, "logs", types.AIEngineRequest{
 					Wfid:        wf.wfid,
 					PullRequest: *wf.pullRequest,
+					RepoUrl:     config.RepositoryUrl,
 					Stdout:      logOut,
 					Stderr:      logErr,
 					StartTime:   contInspect.StartTime,

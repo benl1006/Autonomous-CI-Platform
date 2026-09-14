@@ -1,9 +1,13 @@
+import hashlib
+import hmac
+import json
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.config import settings
 from app.services.log_response import create_log_response
 
 
@@ -95,3 +99,41 @@ def test_result_endpoint_redacts_sensitive_tokens():
     assert "<secret>" in signature
     assert "<path>" in signature
     assert "<uuid>" in signature
+
+
+@pytest.mark.parametrize("job_type", ["open", "edit", "sync"])
+def test_lifecycle_jobs_are_accepted_and_queued(job_type, monkeypatch):
+    body = json.dumps({"Wfid": 1}).encode()
+    monkeypatch.setattr(settings, "ai_engine_secret", "test-secret")
+    sent_responses = []
+
+    async def fake_send_response(*args, **kwargs):
+        sent_responses.append((args, kwargs))
+
+    monkeypatch.setattr(
+        "app.services.orchestrator_client.send_response",
+        fake_send_response,
+    )
+    monkeypatch.setattr(
+        "app.services.repo_test_gen.generate_initial_test",
+        lambda repo_context, pull_request, failure_log="": {
+            "test_name": "tests/generated/test_pr.py",
+            "test_cmd": ["pytest", "tests/generated/test_pr.py"],
+            "test_code": "def test_pr():\n    assert True\n",
+        },
+    )
+    signature = hmac.new(settings.ai_engine_secret.encode(), body, hashlib.sha256).hexdigest()
+
+    response = client.post(
+        "/",
+        content=body,
+        headers={"Job-Type": job_type, "HMAC-Signature-256": signature},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "accepted"}
+    if job_type == "open":
+        assert sent_responses[0][1]["done"] is False
+        assert sent_responses[0][1]["test_name"] == "tests/generated/test_pr.py"
+        assert sent_responses[0][1]["test_cmd"] == ["pytest", "tests/generated/test_pr.py"]
+        assert sent_responses[0][1]["tests"]
