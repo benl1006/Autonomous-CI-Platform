@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,8 +33,10 @@ class Settings(BaseSettings):
     # Orchestrator callback — where to POST AIEngineResponse after processing a job.
     orchestrator_url: str = "http://localhost:8080"
 
-    # Shared secret for HMAC-signing responses sent to the orchestrator.
-    ai_engine_secret: str = ""
+    # Shared secret for HMAC-signing/verifying messages exchanged with the
+    # orchestrator. Env var is INTERNAL_SECRET to match orchestrator/.env's
+    # INTERNAL_SECRET exactly (both sides must use the same value).
+    ai_engine_secret: str = Field(default="", validation_alias="INTERNAL_SECRET")
 
 
 settings = Settings()
