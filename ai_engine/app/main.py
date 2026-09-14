@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 from typing import Literal
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
-from app.core.config import settings  # noqa: F401 — imported to validate env on startup
+from app.core.config import settings
 from app.tasks.workers import analyze_log, celery_app
 
 
@@ -78,6 +80,14 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 VALID_JOB_TYPES = frozenset({"open", "close", "edit", "sync", "logs"})
+
+
+def _verify_hmac(body: bytes, signature: str) -> bool:
+    """Check body against the HMAC-Signature-256 header the orchestrator sends."""
+    if not signature:
+        return False
+    expected = hmac.new(settings.ai_engine_secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
 
 
 class _PullRequestPayload(BaseModel):
@@ -155,11 +165,20 @@ async def _process_job(job_type: str, payload: JobRequest) -> None:
 
 
 @app.post("/")
-async def job_handler(request: Request, background_tasks: BackgroundTasks, payload: JobRequest) -> dict:
+async def job_handler(request: Request, background_tasks: BackgroundTasks) -> dict:
     """Receive a job from the orchestrator, acknowledge immediately, process in background."""
     job_type = request.headers.get("Job-Type", "")
     if job_type not in VALID_JOB_TYPES:
         raise HTTPException(status_code=400, detail=f"Unknown Job-Type: {job_type!r}")
+
+    body = await request.body()
+    if not _verify_hmac(body, request.headers.get("HMAC-Signature-256", "")):
+        raise HTTPException(status_code=401, detail="Invalid or missing HMAC-Signature-256")
+
+    try:
+        payload = JobRequest.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     if job_type in ("open", "edit", "sync"):
         return {"status": "ok"}

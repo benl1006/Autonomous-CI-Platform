@@ -2,8 +2,12 @@ services:
   orchestrator:
     build: ./orchestrator
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:${PORT:-8080}"
     env_file: .env
+    environment:
+      # Derived from AI_ENGINE_PORT so it always matches ai-service's actual
+      # listen port instead of drifting from a hardcoded value.
+      - AI_ENGINE_URL=http://ai-service:${AI_ENGINE_PORT:-8000}
     volumes:
       # Docker-outside-of-Docker: orchestrator controls the HOST daemon.
       # On Linux this usually needs the container's user in the `docker`
@@ -20,6 +24,12 @@ services:
   # can reach it by service name instead of host.docker.internal.
   ai-service:
     env_file: .env
+    environment:
+      # Derived from PORT so it always matches orchestrator's actual
+      # listen port instead of drifting from a hardcoded value.
+      - ORCHESTRATOR_URL=http://orchestrator:${PORT:-8080}
 
   celery-worker:
     env_file: .env
+    environment:
+      - ORCHESTRATOR_URL=http://orchestrator:${PORT:-8080}
