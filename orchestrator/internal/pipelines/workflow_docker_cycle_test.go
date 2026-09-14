@@ -154,14 +154,17 @@ func TestRunWorkflow_MultipleRunTestsCyclesThenClose(t *testing.T) {
 	}()
 
 	for i, wantExit := range []int{1, 1, 0} {
-		wf.jobs <- Job{
-			JobType: "run_tests",
-			Aier: &types.AIEngineResponse{
-				PullRequest: pr,
-				TestCmd:     []string{"pytest", fmt.Sprintf("cycle_%d_test.go", i)},
-				TestName:    fmt.Sprintf("cycle_%d_test.go", i),
-				Tests:       []byte("package cycle"),
-			},
+		job, err := NewAIEJob("run_tests", &types.AIEngineResponse{
+			PullRequest: pr,
+			TestCmd:     []string{"pytest", fmt.Sprintf("cycle_%d_test.go", i)},
+			TestName:    fmt.Sprintf("cycle_%d_test.go", i),
+			Tests:       []byte("package cycle"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !wf.trySend(job) {
+			t.Fatalf("cycle %d: workflow stopped before accepting job", i)
 		}
 
 		select {
@@ -240,14 +243,17 @@ func TestRunWorkflow_StopsAfterMaxTestPatchingAttempts(t *testing.T) {
 	}()
 
 	sendCycle := func(name string) {
-		wf.jobs <- Job{
-			JobType: "run_tests",
-			Aier: &types.AIEngineResponse{
-				PullRequest: pr,
-				TestCmd:     []string{"pytest", name},
-				TestName:    name,
-				Tests:       []byte("package cycle"),
-			},
+		job, err := NewAIEJob("run_tests", &types.AIEngineResponse{
+			PullRequest: pr,
+			TestCmd:     []string{"pytest", name},
+			TestName:    name,
+			Tests:       []byte("package cycle"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !wf.trySend(job) {
+			t.Fatalf("workflow stopped before accepting job %q", name)
 		}
 	}
 

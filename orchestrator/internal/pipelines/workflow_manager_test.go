@@ -31,8 +31,8 @@ func waitForJob(t *testing.T, ch chan Job, want string) {
 	t.Helper()
 	select {
 	case job := <-ch:
-		if job.JobType != want {
-			t.Errorf("JobType = %q, want %q", job.JobType, want)
+		if job.GetJobType() != want {
+			t.Errorf("JobType = %q, want %q", job.GetJobType(), want)
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timed out waiting for %q job", want)

@@ -31,6 +31,9 @@ var (
 	ContainerMemoryCap      int    = 512 // MB
 	MaxTestPatchingAttempts int    = 10
 	TestingEnvSlice         []string
+	AIEJobTypes             = []string{"run_tests", "commit_push"}
+	WebhookJobTypes         = []string{"open", "edit", "sync"}
+	AiEngineJobTypes        = []string{"open", "close", "logs", "edit", "sync"}
 )
 
 const (

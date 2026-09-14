@@ -163,16 +163,8 @@ func aiEngineResponseHandler(aierChan chan<- *types.AIEngineResponse) http.Handl
 // logs: Return the logs of the last test run.
 // edit: Update pr information.
 // sync: Update branch head
-func SendRequestAIEngine(ctx context.Context, jobType string, req types.AIEngineRequest) (err error) {
-	validJobTypes := []string{
-		"open",
-		"close",
-		"edit",
-		"sync",
-		"logs",
-	}
-
-	if !slices.Contains(validJobTypes, jobType) {
+func SendRequestAIEngine(ctx context.Context, aiEngineJobType string, req types.AIEngineRequest) (err error) {
+	if !slices.Contains(config.AiEngineJobTypes, aiEngineJobType) {
 		return fmt.Errorf("Invalid job type")
 	}
 
@@ -196,7 +188,7 @@ func SendRequestAIEngine(ctx context.Context, jobType string, req types.AIEngine
 	}
 	httpReq.Header.Set("HMAC-Signature-256", hmacSig)
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Job-Type", jobType)
+	httpReq.Header.Set("Job-Type", aiEngineJobType)
 
 	resp, err := cli.Do(httpReq)
 	if err != nil {
@@ -210,7 +202,7 @@ func SendRequestAIEngine(ctx context.Context, jobType string, req types.AIEngine
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("Bad response, status: %v", resp.StatusCode)
 	}
-	slog.Info("Request sent to AI engine", "jobtype", jobType, "aier", req)
+	slog.Info("Request sent to AI engine", "jobtype", aiEngineJobType, "aier", req)
 	return nil
 }
 
