@@ -51,7 +51,7 @@ func NewAIEJob(jt string, resp *types.AIEngineResponse) (Job, error) {
 	}
 	return Job{
 		jobType: jt,
-		aier: resp,
+		aier:    resp,
 	}, nil
 }
 
@@ -60,7 +60,7 @@ func NewPullRequestJob(jt string, pr *types.PullRequest) (Job, error) {
 		return Job{}, errors.New("Invalid job type for Pull Request Job: " + jt)
 	}
 	return Job{
-		jobType: jt,
+		jobType:     jt,
 		pullRequest: pr,
 	}, nil
 }
@@ -129,6 +129,10 @@ func (wf *Workflow) isRunning() bool {
 	default:
 		return true
 	}
+}
+
+func (wf *Workflow) resetDone() {
+	wf.done = make(chan struct{})
 }
 
 // Starts the job pipeline. Handles incoming jobs. Blocks until an error occurs.

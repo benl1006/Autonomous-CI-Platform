@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/config"
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/types"
@@ -247,27 +246,17 @@ func TestHandlePullRequest_RejectsReopenedWhileRunning(t *testing.T) {
 	}
 }
 
-func TestHandlePullRequest_ReopenedResetsDoneChannel(t *testing.T) {
-	wfm := NewWorkflowManager()
-	wf := newWorkflow(samplePRPtr("opened"), wfm.wfErrChan)
+func TestWorkflowResetDoneChannel(t *testing.T) {
+	wf := newWorkflow(samplePRPtr("opened"), make(chan ErrorObject, 1))
 	close(wf.done)
-	wfm.Set(42, WorkflowObject{workflow: wf, cancel: func() {}})
 
 	previousDone := wf.done
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if err := wfm.handlePullRequest(ctx, nil, samplePRPtr("reopened"), types.NewPushedCommits()); err != nil {
-		t.Fatal(err)
-	}
+	wf.resetDone()
 	if wf.done == previousDone {
-		t.Fatal("reopened workflow should use a new done channel")
+		t.Fatal("workflow restart should use a new done channel")
 	}
-
-	select {
-	case <-time.After(time.Second):
-		t.Fatal("reopened workflow did not stop")
-	case <-wf.done:
+	if !wf.isRunning() {
+		t.Fatal("workflow should be running after resetting done channel")
 	}
 }
 

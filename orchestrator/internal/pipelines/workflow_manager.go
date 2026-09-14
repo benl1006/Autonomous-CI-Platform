@@ -219,7 +219,7 @@ func (wfm *WorkflowManager) openPr(ctx context.Context, cli dockertools.DockerCl
 		return fmt.Errorf("Failed to create Pull Request job: %w", err)
 	}
 
-	wf.done = make(chan struct{})
+	wf.resetDone()
 	subCtx, end := context.WithCancel(ctx)
 	wfm.Set(pr.Number, WorkflowObject{
 		workflow: wf,
