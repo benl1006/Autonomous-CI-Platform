@@ -6,6 +6,8 @@ import (
 )
 
 type PullRequest struct {
+	RepoName    string `json"repoName"`
+	Owner       string `json:"repoFullName"`
 	Number      int    `json:"number"`
 	Action      string `json:"action"`
 	Branch      string `json:"branch"`
@@ -20,8 +22,14 @@ type PullRequest struct {
 // Populates fields from a byte slice
 func (pr *PullRequest) UnmarshalPullRequest(data []byte) (err error) {
 	var temp struct {
-		Action      string `json:"action"`
+		Repository struct {
+			Name  string `json:"name"`
+			Owner struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+		} `json:"repository"`
 		Number      int    `json:"number"`
+		Action      string `json:"action"`
 		PullRequest struct {
 			Title string `json:"title"`
 			Body  string `json:"body"`
@@ -41,6 +49,8 @@ func (pr *PullRequest) UnmarshalPullRequest(data []byte) (err error) {
 		return fmt.Errorf("Failed to unmarshal json data: %w", err)
 	}
 
+	pr.RepoName = temp.Repository.Name
+	pr.Owner = temp.Repository.Owner.Login
 	pr.Number = temp.Number
 	pr.Action = temp.Action
 	pr.Branch = temp.PullRequest.Head.Ref

@@ -157,7 +157,7 @@ func aiEngineResponseHandler(aierChan chan<- *types.AIEngineResponse) http.Handl
 }
 
 // Sends a http request to the AI Engine.
-// jobType can be one of: "open", "close", "logs", "edit", "sync".
+// jobType can be one of: "open", "close", "test_results", "edit", "sync".
 // open: Start a workflow when a pr opens.
 // close: Close and merge implied; end associated workflow and update rag index.
 // logs: Return the logs of the last test run.
@@ -204,6 +204,10 @@ func SendRequestAIEngine(ctx context.Context, aiEngineJobType string, req types.
 	}
 	slog.Info("Request sent to AI engine", "jobtype", aiEngineJobType, "aier", req)
 	return nil
+}
+
+func SeedRagPipeline() {
+	// TODO: unimplemented
 }
 
 // Posts a comment on the pull request for the results of the test.

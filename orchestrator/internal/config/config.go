@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Add new global variables by adding it below, and set the env override in loadEnv.
 var (
 	WsDir string
 
@@ -29,11 +30,13 @@ var (
 	RequestCloseTimeout     int    = 10  // seconds
 	DockerStartTimeout      int    = 10  // seconds
 	ContainerMemoryCap      int    = 512 // MB
+	ListChangedFilesTimeout int    = 10  // seconds
 	MaxTestPatchingAttempts int    = 10
 	TestingEnvSlice         []string
-	AIEJobTypes             = []string{"run_tests", "commit_push"}
-	WebhookJobTypes         = []string{"open", "edit", "sync"}
-	AiEngineJobTypes        = []string{"open", "close", "logs", "edit", "sync"}
+
+	AIEJobTypes      = []string{"run_tests", "commit_push"}
+	WebhookJobTypes  = []string{"open", "edit", "sync"}
+	AiEngineJobTypes = []string{"open", "close", "test_results", "edit", "sync"}
 )
 
 const (
@@ -77,7 +80,7 @@ func loadTestingEnvVars() error {
 
 	testEnvFile, err := os.Open(envPath)
 	if err != nil {
-		return fmt.Errorf("Failed to open test env file at %s: %w", envPath, err)
+		return fmt.Errorf("Failed to open test env file at %q: %w", envPath, err)
 	}
 	defer testEnvFile.Close()
 
@@ -103,7 +106,7 @@ func loadEnv() error {
 	if err := godotenv.Load(envPath); err != nil {
 		// Non-fatal if running in environments where variables are injected directly (e.g., Docker/K8s)
 		if !os.IsNotExist(err) {
-			return fmt.Errorf("Failed to load .env file from %s: %w", envPath, err)
+			return fmt.Errorf("Failed to load .env file from %q: %w", envPath, err)
 		}
 	}
 
@@ -127,6 +130,13 @@ func loadEnv() error {
 		parsedVal, err := strconv.Atoi(valAiTimeout)
 		if err == nil {
 			RequestTimeout = parsedVal
+		}
+	}
+
+	if valListChangedFilesTimeout := os.Getenv("LIST_CHANGED_FILES_TIMEOUT"); valListChangedFilesTimeout != "" {
+		parsedVal, err := strconv.Atoi(valListChangedFilesTimeout)
+		if err == nil {
+			ListChangedFilesTimeout = parsedVal
 		}
 	}
 
@@ -207,7 +217,7 @@ func validateConfig() error {
 	}
 
 	if len(missing) > 0 {
-		return fmt.Errorf("Missing required environment variables: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("Missing required environment variables: %q", strings.Join(missing, ", "))
 	}
 
 	return nil
@@ -237,7 +247,7 @@ func Init() error {
 	return nil
 }
 
-// Joins and prefixes the root to create the absolute path.
+// Joins and prefixes the orchestrator root to create the absolute path.
 func RelToAbsPath(relPath ...string) string {
 	return filepath.Join(append([]string{OrchRootDir}, relPath...)...)
 }

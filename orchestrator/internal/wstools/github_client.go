@@ -12,6 +12,8 @@ import (
 	"github.com/go-git/go-git/v6/plumbing"
 	gitPlumbingClient "github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/transport/http"
+	"github.com/google/go-github/v92/github"
+
 )
 
 type GithubClient struct{}
@@ -22,14 +24,14 @@ const localBranch = "temp-branch"
 func (c *GithubClient) InitRepo(ctx context.Context, path string, pr types.PullRequest) (err error) {
 	repo, err := git.PlainInit(path, false)
 	if err != nil {
-		return fmt.Errorf("Failed to initialize repo on branch %s: %w", pr.Branch, err)
+		return fmt.Errorf("Failed to initialize repo on branch %q: %w", pr.Branch, err)
 	}
 
 	if _, err = repo.CreateRemote(&gitConfig.RemoteConfig{
 		Name: "origin",
 		URLs: []string{config.RepositoryUrl},
 	}); err != nil {
-		return fmt.Errorf("Failed to create remote on branch %s: %w", pr.Branch, err)
+		return fmt.Errorf("Failed to create remote on branch %q: %w", pr.Branch, err)
 	}
 
 	if _, err := c.updateWorkspace(ctx, path, pr); err != nil {
@@ -121,4 +123,32 @@ func checkoutBranch(repo *git.Repository, ref string) (err error) {
 		return fmt.Errorf("Failed to checkout: %w", err)
 	}
 	return nil
+}
+
+// Get the file paths of the changed files.
+func GetChangedFilePaths(ctx context.Context, owner, repo string, prNum int) (changedFilePaths []string, err error) {
+	client, err := github.NewClient(github.WithAuthToken(config.GithubToken))
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create Github client: %w", err)
+	}
+	opts := &github.ListOptions{
+		PerPage: 100,
+		Page: 1,
+	}
+	for {
+		files, resp, err := client.PullRequests.ListFiles(ctx, owner, repo, prNum, opts)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to list pull request files: %w", err)
+		}
+		for _, file := range files {
+			if file.Filename != nil {
+				changedFilePaths = append(changedFilePaths, *file.Filename)
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return changedFilePaths, nil
 }

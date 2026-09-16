@@ -85,7 +85,7 @@ func ClearOldImages(ctx context.Context, im ImageManager) (err error) {
 	}
 	for _, item := range images.Items {
 		if _, err := im.ImageRemove(ctx, item.ID, dockerClient.ImageRemoveOptions{}); err != nil {
-			return fmt.Errorf("Failed to remove image %s: %w", item.ID, err)
+			return fmt.Errorf("Failed to remove image %q: %w", item.ID, err)
 		}
 	}
 	return nil
@@ -102,7 +102,7 @@ func ClearOldContainers(ctx context.Context, cm ContainerManager) (err error) {
 	}
 	for _, item := range conts.Items {
 		if _, err := cm.ContainerRemove(ctx, item.ID, dockerClient.ContainerRemoveOptions{}); err != nil {
-			return fmt.Errorf("Failed to remove image %s: %w", item.ID, err)
+			return fmt.Errorf("Failed to remove image %q: %w", item.ID, err)
 		}
 	}
 	return nil
@@ -162,7 +162,7 @@ func BuildImage(ctx context.Context, im ImageManager, wsName, sha, srcPath strin
 		return "", fmt.Errorf(
 			"Failed to build image\n"+
 				"Code: %v\n"+
-				"Message: %s\n"+
+				"Message: %q\n"+
 				"Error: %w",
 			t.ErrorDetail.Code, t.ErrorDetail.Message, ImageBuildErr)
 	}
@@ -187,7 +187,7 @@ func RunContainer(ctx context.Context, cm ContainerManager, tag string, cmd []st
 		Image: tag,
 	})
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("Failed to create container %s: %w", tag, err)
+		return "", nil, nil, fmt.Errorf("Failed to create container %q: %w", tag, err)
 	}
 
 	id = cont.ID
@@ -229,7 +229,7 @@ func RunContainer(ctx context.Context, cm ContainerManager, tag string, cmd []st
 func InspectContainer(ctx context.Context, cm ContainerManager, id string) (inspection ContainerInspection, err error) {
 	cont, err := cm.ContainerInspect(ctx, id, dockerClient.ContainerInspectOptions{})
 	if err != nil {
-		return ContainerInspection{}, fmt.Errorf("Failed to inspect container %s: %w", id, err)
+		return ContainerInspection{}, fmt.Errorf("Failed to inspect container %q: %w", id, err)
 	}
 	contState := cont.Container.State
 	start, err := time.Parse(time.RFC3339Nano, contState.StartedAt)
@@ -255,7 +255,7 @@ func InspectContainer(ctx context.Context, cm ContainerManager, id string) (insp
 func RemoveContainer(ctx context.Context, cm ContainerManager, id string) (err error) {
 	cont, err := cm.ContainerInspect(ctx, id, dockerClient.ContainerInspectOptions{})
 	if err != nil {
-		return fmt.Errorf("Failed to inspect container %s: %w", id, err)
+		return fmt.Errorf("Failed to inspect container %q: %w", id, err)
 	}
 
 	// Removes volumes for now

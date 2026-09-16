@@ -35,7 +35,7 @@ func (tb *RealTarBuilder) TarWorkspace(pw *io.PipeWriter, src string) (err error
 
 		fi, tarErr := d.Info()
 		if tarErr != nil {
-			return fmt.Errorf("Failed to get info for %s: %w", relPath, tarErr)
+			return fmt.Errorf("Failed to get info for %q: %w", relPath, tarErr)
 		}
 
 		header, tarErr := tar.FileInfoHeader(fi, d.Name())
@@ -52,7 +52,7 @@ func (tb *RealTarBuilder) TarWorkspace(pw *io.PipeWriter, src string) (err error
 			var file *os.File
 			file, tarErr = os.Open(path)
 			if tarErr != nil {
-				return fmt.Errorf("Failed to open file %s: %w", relPath, tarErr)
+				return fmt.Errorf("Failed to open file %q: %w", relPath, tarErr)
 			}
 			defer func() {
 				if closeErr := file.Close(); closeErr != nil {

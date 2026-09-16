@@ -37,7 +37,7 @@ func TestValidateConfig_MissingRequired(t *testing.T) {
 	msg := err.Error()
 	for _, name := range []string{"GITHUB_TOKEN", "GITHUB_REPOSITORY_URL", "GITHUB_WEBHOOK_SECRET", "INTERNAL_SECRET"} {
 		if !strings.Contains(msg, name) {
-			t.Errorf("error %q missing %s", msg, name)
+			t.Errorf("error %q missing %q", msg, name)
 		}
 	}
 }

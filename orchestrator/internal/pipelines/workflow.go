@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -19,7 +19,7 @@ import (
 )
 
 type Workflow struct {
-	wfid             int // The pr number.
+	wfid             int // The pull request number.
 	pullRequest      *types.PullRequest
 	jobs             chan Job
 	workspace        Workspace
@@ -45,6 +45,9 @@ type Job struct {
 	pullRequest *types.PullRequest
 }
 
+var firstOpen = true // remove when persistance is added
+
+// Creates the specidied AI Engine job. Errors if jt is an invalid job type.
 func NewAIEJob(jt string, resp *types.AIEngineResponse) (Job, error) {
 	if !slices.Contains(config.AIEJobTypes, jt) {
 		return Job{}, errors.New("Invalid job type for AIE job: " + jt)
@@ -55,6 +58,7 @@ func NewAIEJob(jt string, resp *types.AIEngineResponse) (Job, error) {
 	}, nil
 }
 
+// Creates the specified pull request job. Errors if jt is an invalid job type.
 func NewPullRequestJob(jt string, pr *types.PullRequest) (Job, error) {
 	if !slices.Contains(config.WebhookJobTypes, jt) {
 		return Job{}, errors.New("Invalid job type for Pull Request Job: " + jt)
@@ -182,13 +186,40 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 					removeWorkspace: clean,
 				}
 
+				changedFilePaths, err := func(ctx context.Context, owner, repoName string, prNum int) ([]string, error) {
+					newCtx, cancel := context.WithTimeout(ctx, time.Duration(config.RequestTimeout))
+					defer cancel()
+					changedFilePaths, err := wstools.GetChangedFilePaths(newCtx, owner, repoName, prNum)
+					if err != nil {
+						return nil, err
+					}
+					return changedFilePaths, nil
+				}(ctx, wf.pullRequest.Owner, wf.pullRequest.RepoName, wf.wfid)
+				if err != nil {
+					wf.errorChannel <- ErrorObject{
+						wfid: wf.wfid,
+						err:  fmt.Errorf("Failed to get the changed file paths: %w", err),
+					}
+					continue
+				}
+
+				changedFiles, err := wstools.ReadChangedFiles(wf.workspace.path, changedFilePaths)
+				if err != nil {
+					wf.errorChannel <- ErrorObject{
+						wfid: wf.wfid,
+						err:  fmt.Errorf("Failed to read changed files %s from workspace: %w", changedFilePaths, err),
+					}
+					continue
+				}
+
 				if err = servertools.SendRequestAIEngine(ctx, "open", types.AIEngineRequest{
-					Wfid:        wf.wfid,
-					PullRequest: *wf.pullRequest,
+					Wfid:         wf.wfid,
+					PullRequest:  *wf.pullRequest,
+					ChangedFiles: changedFiles,
 				}); err != nil {
 					wf.errorChannel <- ErrorObject{
 						wfid: wf.wfid,
-						err:  fmt.Errorf("Failed to send request to ai engine: %w", err),
+						err:  fmt.Errorf("Failed to send request to AI Engine: %w", err),
 					}
 					continue
 				}
@@ -239,12 +270,20 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 				}
 				wf.attemptNum++
 
-				if err := wstools.InsertTests(filepath.Join(wf.workspace.path, aier.TestName), aier.Tests); err != nil {
-					wf.errorChannel <- ErrorObject{
-						wfid: wf.wfid,
-						err:  fmt.Errorf("Failed to insert tests: %w", err),
+				if err := wstools.InsertTests(wf.workspace.path, aier.Tests); err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						servertools.SendRequestAIEngine(ctx, "test_results", types.AIEngineRequest{
+							Wfid:        wf.wfid,
+							PullRequest: *wf.pullRequest,
+							Error:       err.Error(),
+						})
+					} else {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to insert tests: %w", err),
+						}
+						continue
 					}
-					continue
 				}
 				nameFormatter := strings.NewReplacer("/", "-", "|", "-", "<", "-", ">", "-", "\"", "-")
 				wsName := nameFormatter.Replace(fmt.Sprintf("%s-%v", wf.pullRequest.Branch, wf.wfid))
@@ -275,17 +314,19 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 					continue
 				}
 
-				if err := servertools.SendRequestAIEngine(ctx, "logs", types.AIEngineRequest{
+				if err := servertools.SendRequestAIEngine(ctx, "test_results", types.AIEngineRequest{
 					Wfid:        wf.wfid,
 					PullRequest: *wf.pullRequest,
-					Stdout:      logOut,
-					Stderr:      logErr,
-					StartTime:   contInspect.StartTime,
-					EndTime:     contInspect.EndTime,
-					Errors:      contInspect.Errors,
-					Status:      contInspect.Status,
-					OOMKilled:   contInspect.OOMKilled,
-					ExitCode:    contInspect.ExitCode,
+					TestResults: types.TestResults{
+						Stdout:    logOut,
+						Stderr:    logErr,
+						StartTime: contInspect.StartTime,
+						EndTime:   contInspect.EndTime,
+						Errors:    contInspect.Errors,
+						Status:    contInspect.Status,
+						OOMKilled: contInspect.OOMKilled,
+						ExitCode:  contInspect.ExitCode,
+					},
 				}); err != nil {
 					if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 						continue

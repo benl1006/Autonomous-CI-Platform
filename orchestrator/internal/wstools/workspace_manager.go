@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/config"
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/types"
@@ -68,17 +70,61 @@ func ClearWorkspaces() (err error) {
 	return nil
 }
 
-// Parses and inserts tests.
-func InsertTests(path string, data []byte) (err error) {
-	file, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("Failed to create test file: %w", err)
-	}
-	defer file.Close()
+// Parses and inserts tests to wsPath.
+func InsertTests(wsPath string, tests []types.ChangedFile) (err error) {
 
-	if _, err := file.Write(data); err != nil {
-		return fmt.Errorf("Failed to write tests: %w", err)
+	for _, test := range tests {
+		testPath, err := resolveInBase(wsPath, test.Path)
+		if err != nil {
+			return fmt.Errorf("Failed to resolve path %s from %s: %w", test.Path, wsPath, err)
+		}
+		file, err := os.Create(testPath)
+		if err != nil {
+			return fmt.Errorf("Failed to create test file at %s: %w", testPath, err)
+		}
+		defer file.Close()
+
+		if _, err := file.Write(test.Contents); err != nil {
+			return fmt.Errorf("Failed to write tests: %w", err)
+		}
 	}
 
 	return nil
+}
+
+// Returns a slice of types.ChangedFiles from a slice of paths.
+func ReadChangedFiles(wsPath string, changedFilePaths []string) (changedFiles []types.ChangedFile, err error) {
+	for _, path := range changedFilePaths {
+		cleanPath, err := resolveInBase(wsPath, path)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to resolve path %s from %s: %w", cleanPath, wsPath, err)
+		}
+		fileContents, err := os.ReadFile(cleanPath)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to read file: %w", err)
+		}
+		changedFiles = append(changedFiles, types.ChangedFile{
+			Path: path,
+			Contents: fileContents,
+		})
+	}
+
+	return changedFiles, nil
+}
+
+
+// Returns a clean path and ensures the path stays inside the base.
+func resolveInBase(base, rel string) (path string, err error) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("Path must be relative: %q", rel)
+	}
+
+	joined := filepath.Join(base, rel)
+	cleanBase := filepath.Clean(base)
+
+	baseAndSep := cleanBase + string(filepath.Separator)
+	if joined != cleanBase && !strings.HasPrefix(joined, baseAndSep) {
+		return "", fmt.Errorf("Path %q escapes workspace root %q", rel, base)
+	}
+	return joined, nil
 }
