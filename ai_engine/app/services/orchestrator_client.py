@@ -34,6 +34,7 @@ async def send_response(
     *,
     test_name: str = "",
     tests: bytes = b"",
+    test_cmd: list[str] | None = None,
     summary: str = "",
 ) -> None:
     """POST an AIEngineResponse to the orchestrator /aiengine endpoint."""
@@ -43,6 +44,7 @@ async def send_response(
         "Done": done,
         "TestName": test_name,
         "Tests": base64.b64encode(tests).decode() if tests else "",
+        "TestCmd": test_cmd or [],
         "Summary": summary,
     }
     body = json.dumps(payload).encode()

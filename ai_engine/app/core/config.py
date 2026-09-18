@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 
     # Gemini API key for Google Gemini — used by the patch generator (Phase 4).
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.1-flash-lite-preview"
+    github_pat: str = ""
 
     # sentence-transformers model used to create vector embeddings.
     # all-MiniLM-L6-v2 produces 384-dimensional vectors.
