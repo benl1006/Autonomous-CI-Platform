@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/go-git/go-git/v6 v6.0.0-alpha.5
+	github.com/google/go-github/v92 v92.0.0
 	github.com/joho/godotenv v1.5.1
 	github.com/moby/moby/api v1.56.0
 	github.com/moby/moby/client v0.6.0
@@ -25,6 +26,7 @@ require (
 	github.com/go-git/go-billy/v6 v6.0.0-alpha.2 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/kevinburke/ssh_config v1.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect

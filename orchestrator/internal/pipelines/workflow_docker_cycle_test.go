@@ -154,29 +154,34 @@ func TestRunWorkflow_MultipleRunTestsCyclesThenClose(t *testing.T) {
 	}()
 
 	for i, wantExit := range []int{1, 1, 0} {
-		wf.jobs <- Job{
-			JobType: "run_tests",
-			Aier: &types.AIEngineResponse{
-				PullRequest: pr,
-				TestCmd:     []string{"pytest", fmt.Sprintf("cycle_%d_test.go", i)},
-				TestName:    fmt.Sprintf("cycle_%d_test.go", i),
-				Tests:       []byte("package cycle"),
-			},
+		job, err := NewAIEJob("run_tests", &types.AIEngineResponse{
+			PullRequest: pr,
+			TestCmd:     []string{"pytest", fmt.Sprintf("cycle_%d_test.go", i)},
+			Tests: []types.ChangedFile{{
+				Path:     fmt.Sprintf("cycle_%d_test.go", i),
+				Contents: []byte("package cycle"),
+			}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !wf.trySend(job) {
+			t.Fatalf("cycle %d: workflow stopped before accepting job", i)
 		}
 
 		select {
 		case rec := <-received:
-			if rec.jobType != "logs" {
-				t.Fatalf("cycle %d: Job-Type = %q, want %q", i, rec.jobType, "logs")
+			if rec.jobType != "test_results" {
+				t.Fatalf("cycle %d: Job-Type = %q, want %q", i, rec.jobType, "test_results")
 			}
-			if rec.req.ExitCode != wantExit {
-				t.Errorf("cycle %d: ExitCode = %d, want %d", i, rec.req.ExitCode, wantExit)
+			if rec.req.TestResults.ExitCode != wantExit {
+				t.Errorf("cycle %d: ExitCode = %d, want %d", i, rec.req.TestResults.ExitCode, wantExit)
 			}
 			if rec.req.Wfid != wf.wfid {
 				t.Errorf("cycle %d: Wfid = %d, want %d", i, rec.req.Wfid, wf.wfid)
 			}
 		case <-time.After(2 * time.Second):
-			t.Fatalf("cycle %d: timed out waiting for logs callback", i)
+			t.Fatalf("cycle %d: timed out waiting for test_results callback", i)
 		}
 	}
 
@@ -240,14 +245,19 @@ func TestRunWorkflow_StopsAfterMaxTestPatchingAttempts(t *testing.T) {
 	}()
 
 	sendCycle := func(name string) {
-		wf.jobs <- Job{
-			JobType: "run_tests",
-			Aier: &types.AIEngineResponse{
-				PullRequest: pr,
-				TestCmd:     []string{"pytest", name},
-				TestName:    name,
-				Tests:       []byte("package cycle"),
-			},
+		job, err := NewAIEJob("run_tests", &types.AIEngineResponse{
+			PullRequest: pr,
+			TestCmd:     []string{"pytest", name},
+			Tests: []types.ChangedFile{{
+				Path:     name,
+				Contents: []byte("package cycle"),
+			}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !wf.trySend(job) {
+			t.Fatalf("workflow stopped before accepting job %q", name)
 		}
 	}
 

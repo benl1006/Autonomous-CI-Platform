@@ -93,19 +93,23 @@ func (wfm *WorkflowManager) RunWorkflowPipeline(ctx context.Context, cli dockert
 			}
 
 			if aier.Done {
-				success := wfo.workflow.trySend(Job{
-					JobType: "commit_push",
-					Aier:    aier,
-				})
+				job, err := NewAIEJob("commit_push", aier)
+				if err != nil {
+					slog.Error("Failed to create AIE job")
+					continue
+				}
+				success := wfo.workflow.trySend(job)
 				if !success {
 					slog.Error("Workflow is closed", "ID", aier.Wfid)
 					continue
 				}
 			} else {
-				success := wfo.workflow.trySend(Job{
-					JobType: "run_tests",
-					Aier:    aier,
-				})
+				job, err := NewAIEJob("run_tests", aier)
+				if err != nil {
+					slog.Error("Failed to create AIE job")
+					continue
+				}
+				success := wfo.workflow.trySend(job)
 				if !success {
 					slog.Error("Workflow is closed", "ID", aier.Wfid)
 					continue
@@ -141,15 +145,27 @@ func (wfm *WorkflowManager) handlePullRequest(ctx context.Context, cli dockertoo
 		if slices.Contains(stoppedActions, pr.Action) && wf.isRunning() {
 			return fmt.Errorf("Workflow is already running: %v", wf.wfid)
 		}
-	} else if pr.Action != "opened" {
-		panic(fmt.Sprintf("Workflow does not exist: %v\n Action: %s", pr.Number, pr.Action))
+	}
+
+	// If the workflow manager is started while prs are already open (prs are unregistered and there is no associated workflow yet),
+	// treat the action as "opened" with a warning log.
+	if !exists && pr.Action != "opened" {
+		slog.Warn("Workflow does not exist yet", "wfid", pr.Number, "action", pr.Action)
+		wf := newWorkflow(pr, wfm.wfErrChan)
+		if err := wfm.openPr(ctx, cli, pr, wf, pc); err != nil {
+			return err
+		}
+		slog.Info("New workflow started", "wfid", wf.wfid)
+		return nil
 	}
 
 	switch pr.Action {
 	case "opened":
 		// Creates and starts a new workflow for a new pr
 		wf := newWorkflow(pr, wfm.wfErrChan)
-		wfm.openPr(ctx, cli, pr, wf, pc)
+		if err := wfm.openPr(ctx, cli, pr, wf, pc); err != nil {
+			return err
+		}
 		slog.Info("New workflow started", "wfid", wf.wfid)
 
 	case "closed":
@@ -165,10 +181,11 @@ func (wfm *WorkflowManager) handlePullRequest(ctx context.Context, cli dockertoo
 		slog.Info("Workflow repopened", "wfid", wfo.workflow.wfid)
 
 	case "edited":
-		success := wfo.workflow.trySend(Job{
-			JobType:     "edit",
-			PullRequest: pr,
-		})
+		job, err := NewPullRequestJob("edit", pr)
+		if err != nil {
+			return fmt.Errorf("Failed to create Pull Request job: %w", err)
+		}
+		success := wfo.workflow.trySend(job)
 		if !success {
 			return fmt.Errorf("Workflow %v is closed", wfo.workflow.wfid)
 		}
@@ -179,10 +196,11 @@ func (wfm *WorkflowManager) handlePullRequest(ctx context.Context, cli dockertoo
 			panic(fmt.Sprintf("Attempting to sync a workflow that does not exist: %v", num))
 		}
 
-		success := wfo.workflow.trySend(Job{
-			JobType:     "sync",
-			PullRequest: pr,
-		})
+		job, err := NewPullRequestJob("sync", pr)
+		if err != nil {
+			return fmt.Errorf("Failed to create Pull Request job: %w", err)
+		}
+		success := wfo.workflow.trySend(job)
 		if !success {
 			return fmt.Errorf("Workflow %v is closed", wfo.workflow.wfid)
 		}
@@ -195,7 +213,13 @@ func (wfm *WorkflowManager) handlePullRequest(ctx context.Context, cli dockertoo
 }
 
 // Starts a workflow on pr.
-func (wfm *WorkflowManager) openPr(ctx context.Context, cli dockertools.DockerClient, pr *types.PullRequest, wf *Workflow, pc *types.PushedCommits) {
+func (wfm *WorkflowManager) openPr(ctx context.Context, cli dockertools.DockerClient, pr *types.PullRequest, wf *Workflow, pc *types.PushedCommits) error {
+	job, err := NewPullRequestJob("open", pr)
+	if err != nil {
+		return fmt.Errorf("Failed to create Pull Request job: %w", err)
+	}
+
+	wf.resetDone()
 	subCtx, end := context.WithCancel(ctx)
 	wfm.Set(pr.Number, WorkflowObject{
 		workflow: wf,
@@ -205,8 +229,10 @@ func (wfm *WorkflowManager) openPr(ctx context.Context, cli dockertools.DockerCl
 		defer end()
 		wf.runWorkflow(subCtx, cli, pc)
 	}(subCtx, cli)
-	wf.jobs <- Job{
-		JobType:     "open",
-		PullRequest: wf.pullRequest,
+
+	success := wf.trySend(job)
+	if !success {
+		return fmt.Errorf("Workflow %v is closed", wf.wfid)
 	}
+	return nil
 }

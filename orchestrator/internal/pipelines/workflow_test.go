@@ -49,19 +49,27 @@ func TestWorkflowTrySendAndIsRunning(t *testing.T) {
 		received <- <-wf.jobs
 	}()
 
-	if !wf.trySend(Job{JobType: "edit"}) {
+	job, err := NewPullRequestJob("edit", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wf.trySend(job) {
 		t.Fatal("trySend should deliver while running")
 	}
-	job := <-received
-	if job.JobType != "edit" {
-		t.Errorf("job = %+v", job)
+	receivedJob := <-received
+	if receivedJob.GetJobType() != "edit" {
+		t.Errorf("job = %+v", receivedJob)
 	}
 
 	close(wf.done)
 	if wf.isRunning() {
 		t.Fatal("closed done channel should mark workflow stopped")
 	}
-	if wf.trySend(Job{JobType: "sync"}) {
+	job, err = NewPullRequestJob("sync", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wf.trySend(job) {
 		t.Fatal("trySend should fail after workflow exits")
 	}
 }
@@ -238,6 +246,20 @@ func TestHandlePullRequest_RejectsReopenedWhileRunning(t *testing.T) {
 	}
 }
 
+func TestWorkflowResetDoneChannel(t *testing.T) {
+	wf := newWorkflow(samplePRPtr("opened"), make(chan ErrorObject, 1))
+	close(wf.done)
+
+	previousDone := wf.done
+	wf.resetDone()
+	if wf.done == previousDone {
+		t.Fatal("workflow restart should use a new done channel")
+	}
+	if !wf.isRunning() {
+		t.Fatal("workflow should be running after resetting done channel")
+	}
+}
+
 func TestHandlePullRequest_DuplicateOpenedPanics(t *testing.T) {
 	wfm := NewWorkflowManager()
 	wf := newWorkflow(samplePRPtr("opened"), wfm.wfErrChan)
@@ -251,14 +273,17 @@ func TestHandlePullRequest_DuplicateOpenedPanics(t *testing.T) {
 	_ = wfm.handlePullRequest(context.Background(), nil, samplePRPtr("opened"), types.NewPushedCommits())
 }
 
-func TestHandlePullRequest_MissingWorkflowPanics(t *testing.T) {
+func TestHandlePullRequest_MissingWorkflowStartsWorkflow(t *testing.T) {
 	wfm := NewWorkflowManager()
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected panic")
-		}
-	}()
-	_ = wfm.handlePullRequest(context.Background(), nil, samplePRPtr("edited"), types.NewPushedCommits())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := wfm.handlePullRequest(ctx, nil, samplePRPtr("edited"), types.NewPushedCommits()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := wfm.Get(42); !ok {
+		t.Fatal("expected missing workflow to be started")
+	}
 }
 
 func TestHandlePullRequest_UnsupportedAction(t *testing.T) {

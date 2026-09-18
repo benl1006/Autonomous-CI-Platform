@@ -5,7 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
+	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,15 +19,14 @@ import (
 )
 
 type Workflow struct {
-	wfid             int // The pr number.
-	pullRequest      *types.PullRequest
-	jobs             chan Job
-	workspace        Workspace
-	workspaceMutex   sync.RWMutex
-	attemptNum       int
-	currentTestsPath string
-	errorChannel     chan<- ErrorObject
-	done             chan struct{}
+	wfid           int // The pull request number.
+	pullRequest    *types.PullRequest
+	jobs           chan Job
+	workspace      Workspace
+	workspaceMutex sync.RWMutex
+	attemptNum     int
+	errorChannel   chan<- ErrorObject
+	done           chan struct{}
 }
 
 // Contains information associated with a particular workspace. Protected by a mutex.
@@ -36,18 +36,47 @@ type Workspace struct {
 }
 
 type Job struct {
-	// Can be one of:
-	// - "open"
-	// - "edit"
-	// - "sync"
-	// - "run_tests"
-	// - "commit_push"
-	JobType string
+	// Must be in config.AIEJobTypes or config.WebhookJobTypes
+	jobType string
 
 	// Only one of:
+	aier        *types.AIEngineResponse
+	pullRequest *types.PullRequest
+}
 
-	Aier        *types.AIEngineResponse
-	PullRequest *types.PullRequest
+var firstOpen = true // remove when persistance is added
+
+// Creates the specidied AI Engine job. Errors if jt is an invalid job type.
+func NewAIEJob(jt string, resp *types.AIEngineResponse) (Job, error) {
+	if !slices.Contains(config.AiEngineResponseJobTypes, jt) {
+		return Job{}, errors.New("Invalid job type for AIE job: " + jt)
+	}
+	return Job{
+		jobType: jt,
+		aier:    resp,
+	}, nil
+}
+
+// Creates the specified pull request job. Errors if jt is an invalid job type.
+func NewPullRequestJob(jt string, pr *types.PullRequest) (Job, error) {
+	if !slices.Contains(config.WebhookJobTypes, jt) {
+		return Job{}, errors.New("Invalid job type for Pull Request Job: " + jt)
+	}
+	return Job{
+		jobType:     jt,
+		pullRequest: pr,
+	}, nil
+}
+
+func (j *Job) GetJobType() string {
+	return j.jobType
+}
+
+func (j *Job) GetAIER() *types.AIEngineResponse {
+	return j.aier
+}
+func (j *Job) GetPullRequest() *types.PullRequest {
+	return j.pullRequest
 }
 
 // Creates a new workflow. Path, cleanWs, and cancelWf function are are uninitialized by default.
@@ -105,6 +134,10 @@ func (wf *Workflow) isRunning() bool {
 	}
 }
 
+func (wf *Workflow) resetDone() {
+	wf.done = make(chan struct{})
+}
+
 // Starts the job pipeline. Handles incoming jobs. Blocks until an error occurs.
 func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClient, pc *types.PushedCommits) {
 	defer close(wf.done)
@@ -132,7 +165,7 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 			return
 
 		case job := <-wf.jobs:
-			switch job.JobType {
+			switch job.GetJobType() {
 			case "open":
 				wf.attemptNum = 0
 				path, clean, err := wstools.InitWorkspace(ctx, *wf.pullRequest, &wstools.GithubClient{})
@@ -152,21 +185,62 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 					removeWorkspace: clean,
 				}
 
-				if err = servertools.SendRequestAIEngine(ctx, "open", types.AIEngineRequest{
-					Wfid:        wf.wfid,
-					PullRequest: *wf.pullRequest,
-					RepoUrl:     config.RepositoryUrl,
-				}); err != nil {
-					wf.errorChannel <- ErrorObject{
-						wfid: wf.wfid,
-						err:  fmt.Errorf("Failed to send request to ai engine: %w", err),
+				if firstOpen {
+					path := wf.workspace.path
+					paths, err := wstools.ListAllFilePaths(path)
+					if err != nil {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to list all seed filepaths at %q: %w", path, err),
+						}
+						continue
 					}
-					continue
+					files, err := wstools.ReadFiles(wf.workspace.path, paths)
+					if err != nil {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to get seed contents at %q: %w", path, err),
+						}
+						continue
+					}
+					servertools.SeedRagPipeline(ctx, files)
+				} else {
+
+					changedFilePaths, err := wstools.GetChangedFilePaths(ctx, wf.pullRequest.Owner, wf.pullRequest.RepoName, wf.wfid)
+					if err != nil {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to get the changed file paths: %w", err),
+						}
+						continue
+					}
+
+					changedFiles, err := wstools.ReadFiles(wf.workspace.path, changedFilePaths)
+					if err != nil {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to read changed files %s from workspace: %w", changedFilePaths, err),
+						}
+						continue
+					}
+
+					err = servertools.SendRequestAIEngine(ctx, "open", types.AIEngineRequest{
+						Wfid:         wf.wfid,
+						PullRequest:  *wf.pullRequest,
+						ChangedFiles: changedFiles,
+					})
+					if err != nil {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to send request to AI Engine: %w", err),
+						}
+						continue
+					}
 				}
 
 			case "edit", "sync":
 				wf.attemptNum = 0
-				pr := job.PullRequest
+				pr := job.GetPullRequest()
 				if pr == nil {
 					panic("EDIT or SYNC should always come from a pull request.")
 				}
@@ -175,7 +249,7 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 
 				// May be redundant, but exists just in case the types are relabled.
 				var jt string
-				if job.JobType == "edit" {
+				if job.GetJobType() == "edit" {
 					jt = "edit"
 				} else {
 					jt = "sync"
@@ -193,7 +267,7 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 				}
 
 			case "run_tests":
-				aier := job.Aier
+				aier := job.GetAIER()
 				if aier == nil {
 					panic("RUN_TESTS should always come from a pull request.")
 				}
@@ -210,25 +284,24 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 				}
 				wf.attemptNum++
 
-				testPath := filepath.Clean(aier.TestName)
-				if filepath.IsAbs(testPath) || testPath == ".." || strings.HasPrefix(testPath, ".."+string(filepath.Separator)) {
-					wf.errorChannel <- ErrorObject{
-						wfid: wf.wfid,
-						err:  fmt.Errorf("invalid generated test path: %q", aier.TestName),
+				if err := wstools.InsertTests(wf.workspace.path, aier.Tests); err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						servertools.SendRequestAIEngine(ctx, "test_results", types.AIEngineRequest{
+							Wfid:        wf.wfid,
+							PullRequest: *wf.pullRequest,
+							Error:       err.Error(),
+						})
+					} else {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to insert tests: %w", err),
+						}
+						continue
 					}
-					continue
-				}
-
-				if err := wstools.InsertTests(filepath.Join(wf.workspace.path, testPath), aier.Tests); err != nil {
-					wf.errorChannel <- ErrorObject{
-						wfid: wf.wfid,
-						err:  fmt.Errorf("Failed to insert tests: %w", err),
-					}
-					continue
 				}
 				nameFormatter := strings.NewReplacer("/", "-", "|", "-", "<", "-", ">", "-", "\"", "-")
 				wsName := nameFormatter.Replace(fmt.Sprintf("%s-%v", wf.pullRequest.Branch, wf.wfid))
-				tag, err := dockertools.BuildImage(ctx, cli, wsName, wf.pullRequest.HeadSHA, wf.workspace.path, &dockertools.RealTarBuilder{})
+				tag, err := dockertools.BuildImage(ctx, cli, wsName, wf.pullRequest.HeadSHA, wf.workspace.path, &wstools.RealTarBuilder{})
 				if err != nil {
 					wf.errorChannel <- ErrorObject{
 						wfid: wf.wfid,
@@ -255,18 +328,19 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 					continue
 				}
 
-				if err := servertools.SendRequestAIEngine(ctx, "logs", types.AIEngineRequest{
+				if err := servertools.SendRequestAIEngine(ctx, "test_results", types.AIEngineRequest{
 					Wfid:        wf.wfid,
 					PullRequest: *wf.pullRequest,
-					RepoUrl:     config.RepositoryUrl,
-					Stdout:      logOut,
-					Stderr:      logErr,
-					StartTime:   contInspect.StartTime,
-					EndTime:     contInspect.EndTime,
-					Errors:      contInspect.Errors,
-					Status:      contInspect.Status,
-					OOMKilled:   contInspect.OOMKilled,
-					ExitCode:    contInspect.ExitCode,
+					TestResults: types.TestResults{
+						Stdout:    logOut,
+						Stderr:    logErr,
+						StartTime: contInspect.StartTime,
+						EndTime:   contInspect.EndTime,
+						Errors:    contInspect.Errors,
+						Status:    contInspect.Status,
+						OOMKilled: contInspect.OOMKilled,
+						ExitCode:  contInspect.ExitCode,
+					},
 				}); err != nil {
 					if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 						continue
@@ -279,7 +353,7 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 				}
 
 			case "commit_push":
-				aier := job.Aier
+				aier := job.GetAIER()
 				if aier == nil {
 					panic("RUN_TESTS should always come from a pull request.")
 				}

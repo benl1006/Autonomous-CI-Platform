@@ -87,9 +87,10 @@ func main() {
 /*
 TODO List:
 	- handle hanging workflows due to errors: currently we just drop the whole workflow with no retry
-	- adding timeout contexts for requests?
 	- handle dead containers
-	- list testing and platform limitations and conditions; close platfrom if conditions are not met *
+	- list testing and platform limitations and conditions; close platfrom if conditions are not met
+	- currently seeds rag pipeline on start every time; fine for now, but when persistance is added, must be addressed
+	- implement seeding the rag pipeline 
 
 Wishlist
 	- persistance
