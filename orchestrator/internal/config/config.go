@@ -34,9 +34,10 @@ var (
 	MaxTestPatchingAttempts int    = 10
 	TestingEnvSlice         []string
 
-	AIEJobTypes      = []string{"run_tests", "commit_push"}
-	WebhookJobTypes  = []string{"open", "edit", "sync"}
-	AiEngineJobTypes = []string{"open", "close", "test_results", "edit", "sync"}
+	AiEngineResponseJobTypes = []string{"run_tests", "commit_push"}
+	WebhookJobTypes          = []string{"open", "edit", "sync"}
+	AiEngineRequestJobTypes  = []string{"open", "close", "test_results", "edit", "sync"}
+	AiEngineSeedJobType      = "seed"
 )
 
 const (

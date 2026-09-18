@@ -1,4 +1,4 @@
-package dockertools
+package wstools
 
 import (
 	"archive/tar"
@@ -66,5 +66,8 @@ func (tb *RealTarBuilder) TarWorkspace(pw *io.PipeWriter, src string) (err error
 
 		return tarErr
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("Failed to walk dir %q: %w", src, err)
+	}
+	return nil
 }

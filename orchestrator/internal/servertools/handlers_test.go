@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -296,5 +298,95 @@ func TestSendRequestAIEngine_SuccessAndBadStatus(t *testing.T) {
 	config.AIEngineURL = bad.URL
 	if err := SendRequestAIEngine(ctx, "logs", types.AIEngineRequest{Wfid: 9}); err == nil {
 		t.Fatal("expected error for non-200 response")
+	}
+}
+
+func TestSeedRagPipeline_SendsWorkspaceFiles(t *testing.T) {
+	prevURL, prevSecret, prevTimeout := config.AIEngineURL, config.InternalSecret, config.RequestTimeout
+	t.Cleanup(func() {
+		config.AIEngineURL = prevURL
+		config.InternalSecret = prevSecret
+		config.RequestTimeout = prevTimeout
+	})
+	config.InternalSecret = "aisec"
+	config.RequestTimeout = 2
+
+	workspace := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workspace, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("read me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "pkg", "main.go"), []byte("package pkg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("ReadAll: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %q, want %q", r.Method, http.MethodPost)
+		}
+		if r.Header.Get("Job-Type") != config.AiEngineSeedJobType {
+			t.Errorf("Job-Type = %q, want %q", r.Header.Get("Job-Type"), config.AiEngineSeedJobType)
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", r.Header.Get("Content-Type"))
+		}
+		wantSignature, err := generateHMAC(body, config.InternalSecret)
+		if err != nil {
+			t.Errorf("generateHMAC: %v", err)
+		}
+		if got := r.Header.Get("HMAC-Signature-256"); got != wantSignature {
+			t.Errorf("HMAC signature = %q, want %q", got, wantSignature)
+		}
+
+		var files []types.ChangedFile
+		if err := json.Unmarshal(body, &files); err != nil {
+			t.Errorf("unmarshal seed body: %v", err)
+		}
+		if len(files) != 2 {
+			t.Errorf("seed file count = %d, want 2", len(files))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	config.AIEngineURL = srv.URL
+
+	if err := SeedRagPipeline(context.Background(), workspace); err != nil {
+		t.Fatalf("SeedRagPipeline: %v", err)
+	}
+}
+
+func TestSeedRagPipeline_ReturnsErrorForBadStatus(t *testing.T) {
+	prevURL, prevSecret, prevTimeout := config.AIEngineURL, config.InternalSecret, config.RequestTimeout
+	t.Cleanup(func() {
+		config.AIEngineURL = prevURL
+		config.InternalSecret = prevSecret
+		config.RequestTimeout = prevTimeout
+	})
+	config.InternalSecret = "aisec"
+	config.RequestTimeout = 2
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(srv.Close)
+	config.AIEngineURL = srv.URL
+
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := SeedRagPipeline(context.Background(), workspace)
+	if err == nil || !strings.Contains(err.Error(), "Bad response, status: 502") {
+		t.Fatalf("SeedRagPipeline error = %v, want bad status", err)
 	}
 }

@@ -93,8 +93,8 @@ func InsertTests(wsPath string, tests []types.ChangedFile) (err error) {
 }
 
 // Returns a slice of types.ChangedFiles from a slice of paths.
-func ReadChangedFiles(wsPath string, changedFilePaths []string) (changedFiles []types.ChangedFile, err error) {
-	for _, path := range changedFilePaths {
+func ReadFiles(wsPath string, filePaths []string) (files []types.ChangedFile, err error) {
+	for _, path := range filePaths {
 		cleanPath, err := resolveInBase(wsPath, path)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to resolve path %s from %s: %w", cleanPath, wsPath, err)
@@ -103,15 +103,35 @@ func ReadChangedFiles(wsPath string, changedFilePaths []string) (changedFiles []
 		if err != nil {
 			return nil, fmt.Errorf("Failed to read file: %w", err)
 		}
-		changedFiles = append(changedFiles, types.ChangedFile{
-			Path: path,
+		files = append(files, types.ChangedFile{
+			Path:     path,
 			Contents: fileContents,
 		})
 	}
 
-	return changedFiles, nil
+	return files, nil
 }
 
+// Lists all the relative filepaths in dir.
+func ListAllFilePaths(dir string) (paths []string, err error) {
+	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) (appendErr error) {
+		if walkErr != nil {
+			return fmt.Errorf("Error while walking directory: %w", walkErr)
+		}
+		relPath, appendErr := filepath.Rel(dir, path)
+		if appendErr != nil {
+			return fmt.Errorf("Failed to get the relative path from %q to %q: %w", dir, path, appendErr)
+		}
+		if d.Type().IsRegular() {
+			paths = append(paths, relPath)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get walk dir %q: %w", dir, err)
+	}
+	return paths, nil
+}
 
 // Returns a clean path and ensures the path stays inside the base.
 func resolveInBase(base, rel string) (path string, err error) {

@@ -49,7 +49,7 @@ var firstOpen = true // remove when persistance is added
 
 // Creates the specidied AI Engine job. Errors if jt is an invalid job type.
 func NewAIEJob(jt string, resp *types.AIEngineResponse) (Job, error) {
-	if !slices.Contains(config.AIEJobTypes, jt) {
+	if !slices.Contains(config.AiEngineResponseJobTypes, jt) {
 		return Job{}, errors.New("Invalid job type for AIE job: " + jt)
 	}
 	return Job{
@@ -203,7 +203,7 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 					continue
 				}
 
-				changedFiles, err := wstools.ReadChangedFiles(wf.workspace.path, changedFilePaths)
+				changedFiles, err := wstools.ReadFiles(wf.workspace.path, changedFilePaths)
 				if err != nil {
 					wf.errorChannel <- ErrorObject{
 						wfid: wf.wfid,
@@ -287,7 +287,7 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 				}
 				nameFormatter := strings.NewReplacer("/", "-", "|", "-", "<", "-", ">", "-", "\"", "-")
 				wsName := nameFormatter.Replace(fmt.Sprintf("%s-%v", wf.pullRequest.Branch, wf.wfid))
-				tag, err := dockertools.BuildImage(ctx, cli, wsName, wf.pullRequest.HeadSHA, wf.workspace.path, &dockertools.RealTarBuilder{})
+				tag, err := dockertools.BuildImage(ctx, cli, wsName, wf.pullRequest.HeadSHA, wf.workspace.path, &wstools.RealTarBuilder{})
 				if err != nil {
 					wf.errorChannel <- ErrorObject{
 						wfid: wf.wfid,

@@ -65,7 +65,7 @@ func TestReadChangedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ReadChangedFiles(dir, []string{"pkg/internal/sample.go"})
+	got, err := ReadFiles(dir, []string{"pkg/internal/sample.go"})
 	if err != nil {
 		t.Fatalf("ReadChangedFiles: %v", err)
 	}
@@ -79,9 +79,45 @@ func TestReadChangedFiles(t *testing.T) {
 		t.Fatalf("Contents = %q, want %q", string(got[0].Contents), want)
 	}
 
-	if _, err := ReadChangedFiles(dir, []string{"../escape.go"}); err == nil || !strings.Contains(err.Error(), "escapes workspace root") {
+	if _, err := ReadFiles(dir, []string{"../escape.go"}); err == nil || !strings.Contains(err.Error(), "escapes workspace root") {
 		t.Fatalf("expected escape-path error, got %v", err)
 	}
+}
+
+func TestListAllFilePaths_ReturnsRegularFilesRelativeToWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	nestedDir := filepath.Join(dir, "pkg", "internal")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, contents := range map[string]string{
+		"README.md":              "read me",
+		"pkg/internal/sample.go": "package internal",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(path)), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	paths, err := ListAllFilePaths(dir)
+	if err != nil {
+		t.Fatalf("ListAllFilePaths: %v", err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("file count = %d, want 2", len(paths))
+	}
+	if !containsPath(paths, "README.md") || !containsPath(paths, filepath.FromSlash("pkg/internal/sample.go")) {
+		t.Fatalf("paths = %#v, want workspace-relative files", paths)
+	}
+}
+
+func containsPath(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestGetChangedFilePaths_UsesGitHubAPI(t *testing.T) {

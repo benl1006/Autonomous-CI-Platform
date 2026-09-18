@@ -20,6 +20,7 @@ import (
 
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/config"
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/types"
+	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/wstools"
 )
 
 const githubAPIVersion = "2026-03-10"
@@ -164,7 +165,7 @@ func aiEngineResponseHandler(aierChan chan<- *types.AIEngineResponse) http.Handl
 // edit: Update pr information.
 // sync: Update branch head
 func SendRequestAIEngine(ctx context.Context, aiEngineJobType string, req types.AIEngineRequest) (err error) {
-	if !slices.Contains(config.AiEngineJobTypes, aiEngineJobType) {
+	if !slices.Contains(config.AiEngineRequestJobTypes, aiEngineJobType) {
 		return fmt.Errorf("Invalid job type")
 	}
 
@@ -195,7 +196,8 @@ func SendRequestAIEngine(ctx context.Context, aiEngineJobType string, req types.
 		return fmt.Errorf("Failed to send http request: %w", err)
 	}
 	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
+		_, _ = io.Copy(io.Discard, resp.Body) // drain so the connection can be reused
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
 	}()
@@ -206,8 +208,53 @@ func SendRequestAIEngine(ctx context.Context, aiEngineJobType string, req types.
 	return nil
 }
 
-func SeedRagPipeline() {
-	// TODO: unimplemented
+// Sends the workspace content to the AI Engine to seed the RAG pipeline.
+func SeedRagPipeline(ctx context.Context, src string) (err error) {
+	paths, err := wstools.ListAllFilePaths(src)
+	if err != nil {
+		return fmt.Errorf("Failed to list all seed filepaths at %q: %w", src, err)
+	}
+	files, err := wstools.ReadFiles(src, paths)
+	if err != nil {
+		return fmt.Errorf("Failed to get seed contents at %q: %w", src, err)
+	}
+
+	filesBytes, err := json.Marshal(files)
+	if err != nil {
+		return fmt.Errorf("Failed to marshal seed: %w", err)
+	}
+
+	hmacSig, err := generateHMAC(filesBytes, config.InternalSecret)
+	if err != nil {
+		return fmt.Errorf("Failed to generate HMAC: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, config.AIEngineURL, bytes.NewReader(filesBytes))
+	if err != nil {
+		return fmt.Errorf("Failed to create http request: %w", err)
+	}
+	httpReq.Header.Set("HMAC-Signature-256", hmacSig)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Job-Type", config.AiEngineSeedJobType)
+
+	cli := http.Client{
+		Timeout: seconds(config.RequestTimeout),
+	}
+	resp, err := cli.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("Failed to send http request: %w", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body) // drain so the connection can be reused
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Bad response, status: %v", resp.StatusCode)
+	}
+	slog.Info("Seed sent to AI engine", "jobtype", config.AiEngineSeedJobType)
+	return nil
 }
 
 // Posts a comment on the pull request for the results of the test.
@@ -228,7 +275,12 @@ func PostSummaryComment(ctx context.Context, commentsURL string, body string) (e
 	if err != nil {
 		return fmt.Errorf("Failed to send http request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body) // drain so the connection can be reused
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
