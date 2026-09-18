@@ -20,7 +20,6 @@ import (
 
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/config"
 	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/types"
-	"github.com/benl1006/Autonomous-CI-Platform/orchestrator/internal/wstools"
 )
 
 const githubAPIVersion = "2026-03-10"
@@ -177,8 +176,10 @@ func SendRequestAIEngine(ctx context.Context, aiEngineJobType string, req types.
 	if err != nil {
 		return fmt.Errorf("Failed to marshal the message package: %w", err)
 	}
+	newCtx, cancel := context.WithTimeout(ctx, seconds(config.RequestTimeout))
+	defer cancel()
 	msgReader := bytes.NewReader(msgBytes)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, config.AIEngineURL, msgReader)
+	httpReq, err := http.NewRequestWithContext(newCtx, http.MethodPost, config.AIEngineURL, msgReader)
 	if err != nil {
 		return fmt.Errorf("Failed to create http request: %w", err)
 	}
@@ -209,16 +210,7 @@ func SendRequestAIEngine(ctx context.Context, aiEngineJobType string, req types.
 }
 
 // Sends the workspace content to the AI Engine to seed the RAG pipeline.
-func SeedRagPipeline(ctx context.Context, src string) (err error) {
-	paths, err := wstools.ListAllFilePaths(src)
-	if err != nil {
-		return fmt.Errorf("Failed to list all seed filepaths at %q: %w", src, err)
-	}
-	files, err := wstools.ReadFiles(src, paths)
-	if err != nil {
-		return fmt.Errorf("Failed to get seed contents at %q: %w", src, err)
-	}
-
+func SeedRagPipeline(ctx context.Context, files []types.ChangedFile) (err error) {
 	filesBytes, err := json.Marshal(files)
 	if err != nil {
 		return fmt.Errorf("Failed to marshal seed: %w", err)

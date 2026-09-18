@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -311,15 +309,9 @@ func TestSeedRagPipeline_SendsWorkspaceFiles(t *testing.T) {
 	config.InternalSecret = "aisec"
 	config.RequestTimeout = 2
 
-	workspace := t.TempDir()
-	if err := os.Mkdir(filepath.Join(workspace, "pkg"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("read me"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(workspace, "pkg", "main.go"), []byte("package pkg"), 0o644); err != nil {
-		t.Fatal(err)
+	files := []types.ChangedFile{
+		{Path: "README.md", Contents: []byte("read me")},
+		{Path: "pkg/main.go", Contents: []byte("package pkg")},
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -359,7 +351,7 @@ func TestSeedRagPipeline_SendsWorkspaceFiles(t *testing.T) {
 	t.Cleanup(srv.Close)
 	config.AIEngineURL = srv.URL
 
-	if err := SeedRagPipeline(context.Background(), workspace); err != nil {
+	if err := SeedRagPipeline(context.Background(), files); err != nil {
 		t.Fatalf("SeedRagPipeline: %v", err)
 	}
 }
@@ -380,12 +372,10 @@ func TestSeedRagPipeline_ReturnsErrorForBadStatus(t *testing.T) {
 	t.Cleanup(srv.Close)
 	config.AIEngineURL = srv.URL
 
-	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	err := SeedRagPipeline(context.Background(), workspace)
+	err := SeedRagPipeline(context.Background(), []types.ChangedFile{{
+		Path:     "main.go",
+		Contents: []byte("package main"),
+	}})
 	if err == nil || !strings.Contains(err.Error(), "Bad response, status: 502") {
 		t.Fatalf("SeedRagPipeline error = %v, want bad status", err)
 	}

@@ -19,15 +19,14 @@ import (
 )
 
 type Workflow struct {
-	wfid             int // The pull request number.
-	pullRequest      *types.PullRequest
-	jobs             chan Job
-	workspace        Workspace
-	workspaceMutex   sync.RWMutex
-	attemptNum       int
-	currentTestsPath string
-	errorChannel     chan<- ErrorObject
-	done             chan struct{}
+	wfid           int // The pull request number.
+	pullRequest    *types.PullRequest
+	jobs           chan Job
+	workspace      Workspace
+	workspaceMutex sync.RWMutex
+	attemptNum     int
+	errorChannel   chan<- ErrorObject
+	done           chan struct{}
 }
 
 // Contains information associated with a particular workspace. Protected by a mutex.
@@ -186,42 +185,57 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 					removeWorkspace: clean,
 				}
 
-				changedFilePaths, err := func(ctx context.Context, owner, repoName string, prNum int) ([]string, error) {
-					newCtx, cancel := context.WithTimeout(ctx, time.Duration(config.RequestTimeout))
-					defer cancel()
-					changedFilePaths, err := wstools.GetChangedFilePaths(newCtx, owner, repoName, prNum)
+				if firstOpen {
+					path := wf.workspace.path
+					paths, err := wstools.ListAllFilePaths(path)
 					if err != nil {
-						return nil, err
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to list all seed filepaths at %q: %w", path, err),
+						}
+						continue
 					}
-					return changedFilePaths, nil
-				}(ctx, wf.pullRequest.Owner, wf.pullRequest.RepoName, wf.wfid)
-				if err != nil {
-					wf.errorChannel <- ErrorObject{
-						wfid: wf.wfid,
-						err:  fmt.Errorf("Failed to get the changed file paths: %w", err),
+					files, err := wstools.ReadFiles(wf.workspace.path, paths)
+					if err != nil {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to get seed contents at %q: %w", path, err),
+						}
+						continue
 					}
-					continue
-				}
+					servertools.SeedRagPipeline(ctx, files)
+				} else {
 
-				changedFiles, err := wstools.ReadFiles(wf.workspace.path, changedFilePaths)
-				if err != nil {
-					wf.errorChannel <- ErrorObject{
-						wfid: wf.wfid,
-						err:  fmt.Errorf("Failed to read changed files %s from workspace: %w", changedFilePaths, err),
+					changedFilePaths, err := wstools.GetChangedFilePaths(ctx, wf.pullRequest.Owner, wf.pullRequest.RepoName, wf.wfid)
+					if err != nil {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to get the changed file paths: %w", err),
+						}
+						continue
 					}
-					continue
-				}
 
-				if err = servertools.SendRequestAIEngine(ctx, "open", types.AIEngineRequest{
-					Wfid:         wf.wfid,
-					PullRequest:  *wf.pullRequest,
-					ChangedFiles: changedFiles,
-				}); err != nil {
-					wf.errorChannel <- ErrorObject{
-						wfid: wf.wfid,
-						err:  fmt.Errorf("Failed to send request to AI Engine: %w", err),
+					changedFiles, err := wstools.ReadFiles(wf.workspace.path, changedFilePaths)
+					if err != nil {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to read changed files %s from workspace: %w", changedFilePaths, err),
+						}
+						continue
 					}
-					continue
+
+					err = servertools.SendRequestAIEngine(ctx, "open", types.AIEngineRequest{
+						Wfid:         wf.wfid,
+						PullRequest:  *wf.pullRequest,
+						ChangedFiles: changedFiles,
+					})
+					if err != nil {
+						wf.errorChannel <- ErrorObject{
+							wfid: wf.wfid,
+							err:  fmt.Errorf("Failed to send request to AI Engine: %w", err),
+						}
+						continue
+					}
 				}
 
 			case "edit", "sync":

@@ -6,7 +6,7 @@ import (
 )
 
 type PullRequest struct {
-	RepoName    string `json"repoName"`
+	RepoName    string `json:"repoName"`
 	Owner       string `json:"repoFullName"`
 	Number      int    `json:"number"`
 	Action      string `json:"action"`
