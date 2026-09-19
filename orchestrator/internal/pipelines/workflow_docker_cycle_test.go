@@ -157,7 +157,7 @@ func TestRunWorkflow_MultipleRunTestsCyclesThenClose(t *testing.T) {
 		job, err := NewAIEJob("run_tests", &types.AIEngineResponse{
 			PullRequest: pr,
 			TestCmd:     []string{"pytest", fmt.Sprintf("cycle_%d_test.go", i)},
-			Tests: []types.ChangedFile{{
+			Tests: []types.FileDiff{{
 				Path:     fmt.Sprintf("cycle_%d_test.go", i),
 				Contents: []byte("package cycle"),
 			}},
@@ -248,7 +248,7 @@ func TestRunWorkflow_StopsAfterMaxTestPatchingAttempts(t *testing.T) {
 		job, err := NewAIEJob("run_tests", &types.AIEngineResponse{
 			PullRequest: pr,
 			TestCmd:     []string{"pytest", name},
-			Tests: []types.ChangedFile{{
+			Tests: []types.FileDiff{{
 				Path:     name,
 				Contents: []byte("package cycle"),
 			}},

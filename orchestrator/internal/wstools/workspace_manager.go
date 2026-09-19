@@ -71,7 +71,7 @@ func ClearWorkspaces() (err error) {
 }
 
 // Parses and inserts tests to wsPath.
-func InsertTests(wsPath string, tests []types.ChangedFile) (err error) {
+func InsertTests(wsPath string, tests []types.FileDiff) (err error) {
 
 	for _, test := range tests {
 		testPath, err := resolveInBase(wsPath, test.Path)
@@ -93,7 +93,7 @@ func InsertTests(wsPath string, tests []types.ChangedFile) (err error) {
 }
 
 // Returns a slice of types.ChangedFiles from a slice of paths.
-func ReadFiles(wsPath string, filePaths []string) (files []types.ChangedFile, err error) {
+func ReadFiles(wsPath string, filePaths []string) (files []types.FileDiff, err error) {
 	for _, path := range filePaths {
 		cleanPath, err := resolveInBase(wsPath, path)
 		if err != nil {
@@ -103,7 +103,7 @@ func ReadFiles(wsPath string, filePaths []string) (files []types.ChangedFile, er
 		if err != nil {
 			return nil, fmt.Errorf("Failed to read file: %w", err)
 		}
-		files = append(files, types.ChangedFile{
+		files = append(files, types.FileDiff{
 			Path:     path,
 			Contents: fileContents,
 		})
