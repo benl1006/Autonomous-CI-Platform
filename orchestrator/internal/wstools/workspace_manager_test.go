@@ -32,7 +32,7 @@ func (s *stubGitClient) AddAllCommitPush(commitMsg, wsPath, branch string) (stri
 
 func TestInsertTests_WritesFilesAndRejectsEscapes(t *testing.T) {
 	dir := t.TempDir()
-	if err := InsertTests(dir, []types.ChangedFile{{
+	if err := InsertTests(dir, []types.FileDiff{{
 		Path:     "foo_test.go",
 		Contents: []byte("package foo"),
 	}}); err != nil {
@@ -46,7 +46,7 @@ func TestInsertTests_WritesFilesAndRejectsEscapes(t *testing.T) {
 		t.Errorf("tests file = %q", got)
 	}
 
-	if err := InsertTests(dir, []types.ChangedFile{{
+	if err := InsertTests(dir, []types.FileDiff{{
 		Path:     "../escape_test.go",
 		Contents: []byte("package bad"),
 	}}); err == nil || !strings.Contains(err.Error(), "escapes workspace root") {

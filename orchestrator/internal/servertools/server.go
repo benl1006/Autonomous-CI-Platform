@@ -157,7 +157,7 @@ func aiEngineResponseHandler(aierChan chan<- *types.AIEngineResponse) http.Handl
 }
 
 // Sends a http request to the AI Engine.
-// jobType can be one of: "open", "close", "test_results", "edit", "sync".
+// jobType can be one of: "open", "close", "test_results", "edit", "sync", "init".
 // open: Start a workflow when a pr opens.
 // close: Close and merge implied; end associated workflow and update rag index.
 // logs: Return the logs of the last test run.
@@ -206,46 +206,6 @@ func SendRequestAIEngine(ctx context.Context, aiEngineJobType string, req types.
 		return fmt.Errorf("Bad response, status: %v", resp.StatusCode)
 	}
 	slog.Info("Request sent to AI engine", "jobtype", aiEngineJobType, "aier", req)
-	return nil
-}
-
-// Sends the workspace content to the AI Engine to seed the RAG pipeline.
-func SeedRagPipeline(ctx context.Context, files []types.ChangedFile) (err error) {
-	filesBytes, err := json.Marshal(files)
-	if err != nil {
-		return fmt.Errorf("Failed to marshal seed: %w", err)
-	}
-
-	hmacSig, err := generateHMAC(filesBytes, config.InternalSecret)
-	if err != nil {
-		return fmt.Errorf("Failed to generate HMAC: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, config.AIEngineURL, bytes.NewReader(filesBytes))
-	if err != nil {
-		return fmt.Errorf("Failed to create http request: %w", err)
-	}
-	httpReq.Header.Set("HMAC-Signature-256", hmacSig)
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Job-Type", config.AiEngineSeedJobType)
-
-	cli := http.Client{
-		Timeout: seconds(config.RequestTimeout),
-	}
-	resp, err := cli.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("Failed to send http request: %w", err)
-	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body) // drain so the connection can be reused
-		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Bad response, status: %v", resp.StatusCode)
-	}
-	slog.Info("Seed sent to AI engine", "jobtype", config.AiEngineSeedJobType)
 	return nil
 }
 

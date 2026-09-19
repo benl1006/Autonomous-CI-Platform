@@ -13,7 +13,7 @@ type AIEngineRequest struct {
 	PullRequest PullRequest `json:"pullRequest"`
 
 	// Changed files (optional)
-	ChangedFiles []ChangedFile `json:"changedFiles"`
+	Files []FileDiff `json:"changedFiles"`
 
 	// Test results (optional; leave blank if not sending logs)
 	TestResults TestResults `json:"testResults"`

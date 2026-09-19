@@ -185,9 +185,10 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 					removeWorkspace: clean,
 				}
 
+				var paths []string
 				if firstOpen {
-					path := wf.workspace.path
-					paths, err := wstools.ListAllFilePaths(path)
+					dir := wf.workspace.path
+					paths, err = wstools.ListAllFilePaths(dir)
 					if err != nil {
 						wf.errorChannel <- ErrorObject{
 							wfid: wf.wfid,
@@ -195,18 +196,9 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 						}
 						continue
 					}
-					files, err := wstools.ReadFiles(wf.workspace.path, paths)
-					if err != nil {
-						wf.errorChannel <- ErrorObject{
-							wfid: wf.wfid,
-							err:  fmt.Errorf("Failed to get seed contents at %q: %w", path, err),
-						}
-						continue
-					}
-					servertools.SeedRagPipeline(ctx, files)
-				} else {
 
-					changedFilePaths, err := wstools.GetChangedFilePaths(ctx, wf.pullRequest.Owner, wf.pullRequest.RepoName, wf.wfid)
+				} else {
+					paths, err = wstools.GetChangedFilePaths(ctx, wf.pullRequest.Owner, wf.pullRequest.RepoName, wf.wfid)
 					if err != nil {
 						wf.errorChannel <- ErrorObject{
 							wfid: wf.wfid,
@@ -214,28 +206,27 @@ func (wf *Workflow) runWorkflow(ctx context.Context, cli dockertools.DockerClien
 						}
 						continue
 					}
-
-					changedFiles, err := wstools.ReadFiles(wf.workspace.path, changedFilePaths)
-					if err != nil {
-						wf.errorChannel <- ErrorObject{
-							wfid: wf.wfid,
-							err:  fmt.Errorf("Failed to read changed files %s from workspace: %w", changedFilePaths, err),
-						}
-						continue
+				}
+				files, err := wstools.ReadFiles(wf.workspace.path, paths)
+				if err != nil {
+					wf.errorChannel <- ErrorObject{
+						wfid: wf.wfid,
+						err:  fmt.Errorf("Failed to get seed contents at %q: %w", path, err),
 					}
-
-					err = servertools.SendRequestAIEngine(ctx, "open", types.AIEngineRequest{
-						Wfid:         wf.wfid,
-						PullRequest:  *wf.pullRequest,
-						ChangedFiles: changedFiles,
-					})
-					if err != nil {
-						wf.errorChannel <- ErrorObject{
-							wfid: wf.wfid,
-							err:  fmt.Errorf("Failed to send request to AI Engine: %w", err),
-						}
-						continue
+					continue
+				}
+				req := types.AIEngineRequest{
+					Wfid:        wf.wfid,
+					PullRequest: *wf.pullRequest,
+					Files:       files,
+				}
+				err = servertools.SendRequestAIEngine(ctx, "open", req)
+				if err != nil {
+					wf.errorChannel <- ErrorObject{
+						wfid: wf.wfid,
+						err:  fmt.Errorf("Failed to send request to AI Engine: %w", err),
 					}
+					continue
 				}
 
 			case "edit", "sync":

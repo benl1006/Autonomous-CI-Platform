@@ -8,8 +8,8 @@ type AIEngineResponse struct {
 	PullRequest PullRequest `json:"pullRequest"`
 
 	// Tests are ignored if Done.
-	TestCmd  []string      `json:"testCmd"`
-	Tests    []ChangedFile `json:"tests"`
+	TestCmd []string   `json:"testCmd"`
+	Tests   []FileDiff `json:"tests"`
 
 	// Done should always be accompanied by Summary.
 	Done    bool   `json:"done"`

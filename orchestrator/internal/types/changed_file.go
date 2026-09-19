@@ -1,8 +1,6 @@
 package types
 
-import ()
-
-type ChangedFile struct {
+type FileDiff struct {
 	Path     string `json:"path"`
 	Contents []byte `json:"contents"`
 }
